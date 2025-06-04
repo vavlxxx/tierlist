@@ -453,5 +453,203 @@ function resetTierlist() {
     });
     renderTierlist();
 }
+
+// Экспорт всех изображений в JSON с base64 кодировкой
+function exportImagesJSON() {
+    // Создаем объект для экспорта с полной структурой
+    const exportData = {
+        timestamp: new Date().toISOString(),
+        version: "1.1",
+        tiers: tiers.map((tier, tierIndex) => ({
+        index: tierIndex,
+        label: tier.label,
+        color: tier.color,
+        icon: tier.icon,
+        images: tier.images.map((img, imgIndex) => ({
+            data: img,
+            position: imgIndex,
+            location: "tier",
+            tierIndex: tierIndex
+        }))
+        })),
+        imageBank: imageBank.map((img, imgIndex) => ({
+        data: img,
+        position: imgIndex,
+        location: "bank"
+        }))
+    };
+    
+    // Подсчитываем общее количество изображений
+    let totalImages = imageBank.length;
+    tiers.forEach(tier => {
+        totalImages += tier.images.length;
+    });
+    
+    exportData.totalImages = totalImages;
+    
+    if (totalImages === 0) {
+        alert('Нет изображений для экспорта!');
+        return;
+    }
+    
+    // Экспортируем в файл
+    const json = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([json], {type: "application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tierlist_full_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    
+    alert(`Экспортировано ${totalImages} изображений с сохранением позиций!`);
+    }
+      
+
+  
+  // Импорт изображений из JSON
+  function importImagesJSON(jsonData) {
+    try {
+      const data = JSON.parse(jsonData);
+      
+      // Проверяем версию и формат
+      if (data.version === "1.1" && data.tiers && data.imageBank) {
+        // Новый формат с позициями
+        importFullTierlistStructure(data);
+      } else if (data.images && Array.isArray(data.images)) {
+        // Старый формат - только изображения в банк
+        importLegacyImages(data);
+      } else {
+        throw new Error('Некорректный формат файла');
+      }
+      
+    } catch (error) {
+      alert('Ошибка при импорте: ' + error.message);
+    }
+  }
+  
+  function importFullTierlistStructure(data) {
+    let importedImages = 0;
+    let restoredTiers = 0;
+    
+    // Очищаем текущие данные
+    const shouldClear = confirm('Заменить текущий тирлист импортированными данными?\n\nДа - заменить полностью\nНет - добавить к существующим');
+    
+    if (shouldClear) {
+      // Полная замена
+      tiers = [];
+      imageBank = [];
+      
+      // Восстанавливаем структуру уровней
+      data.tiers.forEach(tierData => {
+        const newTier = {
+          label: tierData.label,
+          color: tierData.color,
+          icon: tierData.icon || '',
+          images: []
+        };
+        
+        // Восстанавливаем изображения в правильном порядке
+        tierData.images
+          .sort((a, b) => a.position - b.position)
+          .forEach(imgData => {
+            if (isValidImageBase64(imgData.data)) {
+              newTier.images.push(imgData.data);
+              importedImages++;
+            }
+          });
+        
+        tiers.push(newTier);
+        restoredTiers++;
+      });
+      
+      // Восстанавливаем банк изображений
+      data.imageBank
+        .sort((a, b) => a.position - b.position)
+        .forEach(imgData => {
+          if (isValidImageBase64(imgData.data)) {
+            imageBank.push(imgData.data);
+            importedImages++;
+          }
+        });
+      
+      alert(`Импорт завершен!\nВосстановлено уровней: ${restoredTiers}\nИзображений: ${importedImages}`);
+      
+    } else {
+      // Добавление к существующим
+      data.imageBank.forEach(imgData => {
+        if (isValidImageBase64(imgData.data) && !imageBank.includes(imgData.data)) {
+          imageBank.push(imgData.data);
+          importedImages++;
+        }
+      });
+      
+      alert(`Добавлено ${importedImages} новых изображений в банк`);
+    }
+    
+    renderTierlist();
+    updateImageCounter();
+  }
+  
+  function importLegacyImages(data) {
+    let importedCount = 0;
+    
+    data.images.forEach(imageObj => {
+      try {
+        if (imageObj.data && imageObj.data.startsWith('data:image/')) {
+          if (!imageBank.includes(imageObj.data)) {
+            imageBank.push(imageObj.data);
+            importedCount++;
+          }
+        }
+      } catch (err) {
+        console.error('Ошибка импорта изображения:', err);
+      }
+    });
+    
+    renderImageBank();
+    updateImageCounter();
+    
+    if (importedCount > 0) {
+      alert(`Импортировано ${importedCount} изображений в банк (старый формат)`);
+    } else {
+      alert('Не удалось импортировать изображения');
+    }
+  }
+  
+  
+  function isValidImageBase64(base64String) {
+    if (!base64String || typeof base64String !== 'string') {
+      return false;
+    }
+    const imagePattern = /^data:image\/(jpeg|jpg|png|gif|bmp|webp);base64,/;
+    return imagePattern.test(base64String);
+  }
+  
+
+  // Конвертация изображения в base64 (для будущего использования)
+  function convertImageToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+  
+// Обработчик импорта изображений
+document.getElementById('import-images').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = function(ev) {
+      importImagesJSON(ev.target.result);
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  });
+  
+
 // --- ИНИЦИАЛИЗАЦИЯ ---
 renderTierlist();
